@@ -1,70 +1,104 @@
 pipeline {
     agent any
 
+    environment {
+        SHORT_SHA = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+    }
+
+    triggers {
+        pollSCM('* * * * *')
+    }
+
     stages {
 
         stage('Detect Changes') {
             steps {
                 script {
-                    def diff = sh(script: "git diff --name-only origin/main...HEAD", returnStdout: true).trim()
-                    SERVICES = []
-
-                    ["user-service", "transaction-service", "notification-service"].each { svc ->
-                        if (diff.readLines().any { it.startsWith("${svc}/") }) {
-                            SERVICES << svc
-                        }
-                    }
-
-                    echo "Changed services: ${SERVICES}"
+                    CHANGED = sh(script: "ci/detect_changes.sh", returnStdout: true).trim().split("\n")
+                    echo "Changed services: ${CHANGED}"
                 }
             }
         }
 
         stage('Lint') {
-            when { expression { SERVICES.size() > 0 } }
             steps {
                 script {
-                    parallel SERVICES.collectEntries { svc ->
-                        ["Lint ${svc}": { sh "bash shared/ci/lint.sh ${svc}" }]
+                    CHANGED.each { service ->
+                        if (fileExists("${service}/package.json")) {
+                            sh "ci/lint_node.sh ${service}"
+                        }
+                        if (fileExists("${service}/requirements.txt")) {
+                            sh "ci/lint_python.sh ${service}"
+                        }
+                        if (fileExists("${service}/go.mod")) {
+                            sh "ci/lint_go.sh ${service}"
+                        }
                     }
                 }
             }
         }
 
-        stage('Test') {
-            when { expression { SERVICES.size() > 0 } }
+        stage('Unit Tests') {
             steps {
                 script {
-                    parallel SERVICES.collectEntries { svc ->
-                        ["Test ${svc}": { sh "bash shared/ci/test.sh ${svc}" }]
+                    CHANGED.each { service ->
+                        if (fileExists("${service}/package.json")) {
+                            sh "ci/test_node.sh ${service}"
+                        }
+                        if (fileExists("${service}/requirements.txt")) {
+                            sh "ci/test_python.sh ${service}"
+                        }
+                        if (fileExists("${service}/go.mod")) {
+                            sh "ci/test_go.sh ${service}"
+                        }
                     }
                 }
             }
         }
 
-        stage('Security Scan') {
-            when { expression { SERVICES.size() > 0 } }
+        stage('Security Scans') {
             steps {
                 script {
-                    parallel SERVICES.collectEntries { svc ->
-                        ["Scan ${svc}": { sh "bash shared/ci/scan.sh ${svc}" }]
+                    sh "ci/scan_secrets.sh"
+
+                    CHANGED.each { service ->
+                        if (fileExists("${service}/package.json")) {
+                            sh "ci/scan_node.sh ${service}"
+                        }
+                        if (fileExists("${service}/requirements.txt")) {
+                            sh "ci/scan_python.sh ${service}"
+                        }
+                        if (fileExists("${service}/go.mod")) {
+                            sh "ci/scan_go.sh ${service}"
+                        }
                     }
                 }
             }
         }
 
         stage('Docker Build') {
-            when { expression { SERVICES.size() > 0 } }
             steps {
                 script {
-                    parallel SERVICES.collectEntries { svc ->
-                        ["Build ${svc}": {
-                            sh """
-                                docker build -t ${svc}:ci-\$(git rev-parse --short HEAD) ${svc}
-                            """
-                        }]
+                    CHANGED.each { service ->
+                        def imageName = "benteva/${service}"
+                        sh "ci/build_docker.sh ${service} ${imageName} ${SHORT_SHA}"
                     }
                 }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo "Deploy step placeholder"
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "Sending notification..."
+                sh "ci/notify.sh https://example.com/webhook 'Pipeline finished for commit ${SHORT_SHA}'"
             }
         }
     }
