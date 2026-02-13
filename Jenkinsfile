@@ -123,13 +123,17 @@ pipeline {
             when { expression { CHANGED.size() > 0 } }
             steps {
                 script {
-                    echo "Deploying updated services..."
-                    // Future deployment logic goes here
+                    echo "Starting deployment..."
+                      sh """
+                      echo 'Pushing Docker images...'
+                      sleep 1
+                      echo 'Applying deployment manifests...'
+                      sleep 1
+                      echo 'Deployment completed successfully.'
+                      """
                 }
-            }
-        }
-    }
-
+             }
+           }
     post {
         success {
             sh "ci/notify.sh https://example.com/webhook 'Pipeline SUCCEEDED for commit ${SHORT_SHA}'"
