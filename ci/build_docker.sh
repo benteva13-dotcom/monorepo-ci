@@ -20,7 +20,12 @@ fi
 echo "Building Docker image for service: $SERVICE_PATH"
 cd "$SERVICE_PATH"
 
-# Build image
+# Check docker exists
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Error: Docker is not installed"
+  exit 1
+fi
+
 echo "Running: docker build -t ${IMAGE_NAME}:ci-${SHORT_SHA} ."
 docker build -t "${IMAGE_NAME}:ci-${SHORT_SHA}" .
 
